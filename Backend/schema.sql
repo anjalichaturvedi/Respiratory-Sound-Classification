@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS patients (
     email VARCHAR(255) UNIQUE NOT NULL,
     username VARCHAR(100) UNIQUE NOT NULL,
     full_name VARCHAR(255) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255),
     age_range VARCHAR(20),
     gender VARCHAR(20),
     smoking_status VARCHAR(50),

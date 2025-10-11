@@ -212,6 +212,16 @@ class PatientDataResponse(BaseModel):
     previous_respiratory_infections: Optional[int] = 0
     last_consultation_date: Optional[str] = None
 
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",") # It reads the variable here
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,  # And uses it here to configure CORS
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # ---------------- ENDPOINTS ---------------- #
 @app.get("/", tags=["General"])
 async def root():
