@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import '../css/Chatbot.css';
-import { FiUser, FiCpu, FiSend, FiPaperclip, FiXCircle } from 'react-icons/fi';
+import { FiUser, FiCpu, FiSend, FiPaperclip, FiXCircle, FiAlertCircle } from 'react-icons/fi';
 import { getApiUrl } from '../config/api';
 
 const Chatbot = ({ user }) => {
@@ -13,6 +13,7 @@ const Chatbot = ({ user }) => {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [audioFile, setAudioFile] = useState(null);
+  const [errorDetails, setErrorDetails] = useState(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -33,6 +34,7 @@ const Chatbot = ({ user }) => {
     }
     
     setAudioFile(file);
+    setErrorDetails(null);
   };
 
   const handleSend = async () => {
@@ -50,11 +52,15 @@ const Chatbot = ({ user }) => {
     setInput("");
     setAudioFile(null);
     setLoading(true);
+    setErrorDetails(null);
 
     try {
       let audioResult = null;
 
+      // Audio Analysis Phase
       if (fileToSend) {
+        console.log('📤 Uploading audio file:', fileToSend.name);
+        
         const formData = new FormData();
         formData.append('patient_id', user.username);
         formData.append('user_query', messageToSend);
@@ -65,44 +71,113 @@ const Chatbot = ({ user }) => {
           body: formData,
         });
 
+        console.log('📥 Audio response status:', audioResponse.status);
+
         if (!audioResponse.ok) {
-          const errorData = await audioResponse.json();
+          const errorData = await audioResponse.json().catch(() => ({ 
+            detail: `Audio analysis failed with status ${audioResponse.status}` 
+          }));
+          console.error('❌ Audio analysis error:', errorData);
           throw new Error(errorData.detail || 'Audio analysis failed');
         }
         
         const audioData = await audioResponse.json();
+        console.log('✅ Audio analysis result:', audioData);
         audioResult = audioData;
         
         const analysisInfo = `🔬 Audio Analysis: ${audioResult.disease} (Confidence: ${(audioResult.confidence * 100).toFixed(1)}%)`;
         setMessages(prev => [...prev, { text: analysisInfo, sender: 'bot', isInfo: true }]);
       }
 
+      // Chat Phase
+      console.log('💬 Sending chat request...');
+      console.log('Patient ID:', user.username);
+      console.log('Query:', messageToSend);
+      console.log('Audio Result:', audioResult);
+
+      const chatPayload = {
+        patient_id: user.username,
+        query: messageToSend,
+        audio_result: audioResult
+      };
+
+      console.log('📤 Chat payload:', JSON.stringify(chatPayload, null, 2));
+
       const chatResponse = await fetch(getApiUrl("/api/chat"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          patient_id: user.username,
-          query: messageToSend,
-          audio_result: audioResult
-        }),
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify(chatPayload),
       });
 
+      console.log('📥 Chat response status:', chatResponse.status);
+      console.log('📥 Chat response headers:', Object.fromEntries(chatResponse.headers.entries()));
+
+      // Get response text first for better error handling
+      const responseText = await chatResponse.text();
+      console.log('📥 Raw response:', responseText);
+
       if (!chatResponse.ok) {
-        const errorData = await chatResponse.json();
+        let errorData;
+        try {
+          errorData = JSON.parse(responseText);
+        } catch (e) {
+          errorData = { detail: responseText || `Server error (${chatResponse.status})` };
+        }
+        
+        console.error('❌ Chat error:', errorData);
+        
+        // Store error details for debugging
+        setErrorDetails({
+          status: chatResponse.status,
+          detail: errorData.detail,
+          timestamp: new Date().toISOString()
+        });
+        
         throw new Error(errorData.detail || 'Failed to get AI response');
       }
       
-      const chatData = await chatResponse.json();
+      let chatData;
+      try {
+        chatData = JSON.parse(responseText);
+      } catch (e) {
+        console.error('❌ Failed to parse chat response:', e);
+        throw new Error('Invalid response format from server');
+      }
+
+      console.log('✅ Chat response data:', chatData);
+
+      if (!chatData.response) {
+        console.error('❌ Missing response field in chat data:', chatData);
+        throw new Error('Invalid response format: missing response text');
+      }
+      
       const botMessage = { text: chatData.response, sender: "bot" };
       setMessages(prev => [...prev, botMessage]);
 
     } catch (error) {
-      console.error("API Error:", error);
-      const errorMessage = { 
-        text: `Sorry, an error occurred: ${error.message}. Please try again.`, 
-        sender: "bot" 
+      console.error("❌ API Error:", error);
+      console.error("Error stack:", error.stack);
+      
+      // Provide detailed error message
+      let errorMessage = "Sorry, I encountered an error. ";
+      
+      if (error.message.includes('fetch')) {
+        errorMessage += "Unable to connect to the server. Please check your internet connection.";
+      } else if (error.message.includes('audio')) {
+        errorMessage += `Audio processing failed: ${error.message}`;
+      } else {
+        errorMessage += error.message;
+      }
+      
+      const errorMsg = { 
+        text: errorMessage, 
+        sender: "bot",
+        isError: true
       };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setLoading(false);
     }
@@ -113,6 +188,23 @@ const Chatbot = ({ user }) => {
       <div className="chatbot-header">
         <h2>⚕️ Welcome to A.I.R.A., {user.username}</h2>
         <p>Your Personal AI Health Companion</p>
+        
+        {/* Debug Info Toggle */}
+        {errorDetails && (
+          <div style={{
+            background: '#fff3cd',
+            border: '1px solid #ffc107',
+            borderRadius: '4px',
+            padding: '8px 12px',
+            marginTop: '8px',
+            fontSize: '12px',
+            fontFamily: 'monospace'
+          }}>
+            <strong>Debug Info:</strong> Status {errorDetails.status} - {errorDetails.detail}
+            <br />
+            <small>{errorDetails.timestamp}</small>
+          </div>
+        )}
       </div>
       
       <div className="chatbot-messages">
@@ -120,10 +212,11 @@ const Chatbot = ({ user }) => {
           <div key={index} className={`message-wrapper ${message.sender}`}>
             {!message.isInfo && (
               <div className="message-icon">
-                {message.sender === "user" ? <FiUser /> : <FiCpu />}
+                {message.sender === "user" ? <FiUser /> : 
+                 message.isError ? <FiAlertCircle /> : <FiCpu />}
               </div>
             )}
-            <div className={`message-bubble ${message.isInfo ? 'info' : ''}`}>
+            <div className={`message-bubble ${message.isInfo ? 'info' : ''} ${message.isError ? 'error' : ''}`}>
               {message.text}
             </div>
           </div>

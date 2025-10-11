@@ -30,40 +30,45 @@ const AuthPage = ({ onLoginSuccess }) => {
   };
 
   const handleGoogleSuccess = async (credentialResponse) => {
-    setLoading(true);
-    setError("");
+  setLoading(true);
+  setError("");
+  
+  try {
+    const decoded = jwtDecode(credentialResponse.credential);
     
-    try {
-      const decoded = jwtDecode(credentialResponse.credential);
-      const googleUser = {
-        email: decoded.email,
-        name: decoded.name,
-        picture: decoded.picture,
-        google_id: decoded.sub,
-      };
+    const googleUser = {
+      email: decoded.email,
+      name: decoded.name,
+      picture: decoded.picture || null,
+      google_id: decoded.sub,
+    };
 
-      const response = await fetch(getApiUrl("/google-login"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(googleUser),
-      });
+    // IMPORTANT: Make sure it's POST, not GET
+    const response = await fetch(getApiUrl("/google-login"), {
+      method: "POST",  // ← Must be POST
+      headers: { 
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(googleUser),  // ← Must have body
+    });
 
-      const data = await response.json();
+    const data = await response.json();
 
-      if (response.ok) {
-        localStorage.setItem("access_token", data.access_token);
-        onLoginSuccess(data.user_info);
-        navigate("/chat");
-      } else {
-        setError(data.detail || "Google login failed.");
-      }
-    } catch (err) {
-      console.error("Google Login Error:", err);
-      setError("Something went wrong during Google login.");
-    } finally {
-      setLoading(false);
+    if (response.ok) {
+      localStorage.setItem("access_token", data.access_token);
+      localStorage.setItem("user_info", JSON.stringify(data.user_info));
+      onLoginSuccess(data.user_info);
+      navigate("/chat");
+    } else {
+      setError(data.detail || "Login failed");
     }
-  };
+  } catch (err) {
+    console.error("Error:", err);
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleRegister = async (e) => {
     e.preventDefault();

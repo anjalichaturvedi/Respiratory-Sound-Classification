@@ -182,13 +182,22 @@ Provide a helpful, medically-informed response considering all available context
         
         Args:
             full_context: Retrieved context from DataRetrievalAgent
-            
+        
         Returns:
             Formatted string for prompt injection
         """
-        patient_data = full_context.get('patient_data', {})
+        patient_data = full_context.get('patient_data')
         patient_history = full_context.get('patient_history', [])
         
+        # Handle case where patient_data is None
+        if not patient_data:
+            logger.warning("No patient data found in context")
+            return """Patient Profile: No patient data available
+            
+    This appears to be a new patient or the profile hasn't been loaded yet.
+    Please ask the patient to provide their basic medical information."""
+        
+        # Build context string with patient data
         context_str = "Patient Profile (Anonymized):\n"
         context_str += f"- Age Range: {patient_data.get('age_range', 'Unknown')}\n"
         context_str += f"- Gender: {patient_data.get('gender', 'Unknown')}\n"
@@ -362,9 +371,9 @@ Severity Level: {audio_result.get('severity', 'Not specified')}
             for msg in chat_history["chat_history"]:
                 # Check message type properly
                 if hasattr(msg, 'type'):
-                    role = "Patient" if msg.type == "human" else "Dr. LungScope"
+                    role = "Patient" if msg.type == "human" else "Dr. AIRA"
                 else:
-                    role = "Dr. LungScope"
+                    role = "Dr. AIRA"
                 
                 content = msg.content if hasattr(msg, 'content') else str(msg)
                 history_str += f"{role}: {content}\n"
@@ -526,7 +535,7 @@ if __name__ == "__main__":
     
     # Print structured response
     print("\n" + "="*50)
-    print("LUNGSCOPE AI RESPONSE")
+    print("AIRA AI RESPONSE")
     print("="*50)
     print(json.dumps(response, indent=2))
     print("="*50 + "\n")

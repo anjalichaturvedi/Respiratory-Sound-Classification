@@ -235,7 +235,6 @@ class DatabaseManager:
             
             cursor = self.conn.cursor()
             
-            # ✅ Hash password if provided (for local auth)
             password_hash = None
             if patient_data.get('password'):
                 password_hash = self.hash_password(patient_data['password'])
@@ -256,7 +255,7 @@ class DatabaseManager:
                 patient_data.get('email'),
                 patient_data.get('username'),
                 patient_data.get('full_name'),
-                password_hash,  # ✅ Use hashed password
+                password_hash,
                 patient_data.get('age_range'),
                 patient_data.get('gender'),
                 patient_data.get('smoking_status'),
@@ -285,7 +284,7 @@ class DatabaseManager:
             logger.error(f"Error creating patient: {e}")
             self.conn.rollback()
             return False
-    
+        
     def update_patient(self, patient_id: str, update_data: Dict[str, Any]) -> bool:
         """Updates an existing patient record in the database"""
         try:

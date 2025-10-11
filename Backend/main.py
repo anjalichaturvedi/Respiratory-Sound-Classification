@@ -1,6 +1,5 @@
 """
 main.py - FastAPI Backend for A.I.R.A. (AI Respiratory Assistant)
-FIXED VERSION FOR DEPLOYMENT
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Depends
@@ -160,10 +159,16 @@ class GoogleAuthData(BaseModel):
     picture: str
     google_id: str
 
+class GoogleAuthData(BaseModel):
+    email: EmailStr
+    name: str
+    picture: str | None = None
+    google_id: str
+
 class Token(BaseModel):
     access_token: str
     token_type: str
-    user_info: Dict[str, Any]
+    user_info: dict
 
 class ChatRequest(BaseModel):
     patient_id: str = Field(..., example="PATIENT_12345")
@@ -403,74 +408,6 @@ async def login_for_access_token(
         raise HTTPException(
             status_code=500,
             detail=f"Login failed: {str(e)}"
-        )
-    finally:
-        agent.cleanup()
-
-@app.post("/google-login", response_model=Token, tags=["Authentication"])
-async def google_login(google_data: GoogleAuthData):
-    """Login or register with Google OAuth"""
-    agent = DataRetrievalAgent()
-    try:
-        user = agent.db_manager.get_patient_for_auth(google_data.email.lower())
-        
-        if user:
-            patient_profile = agent.db_manager.get_patient_data(user['patient_id'])
-        else:
-            patient_id = f"PT_{uuid.uuid4().hex[:12].upper()}"
-            username = google_data.email.split('@')[0]
-            
-            counter = 1
-            original_username = username
-            while agent.db_manager.get_patient_for_auth(username):
-                username = f"{original_username}{counter}"
-                counter += 1
-            
-            db_data = {
-                'patient_id': patient_id,
-                'email': google_data.email.lower(),
-                'username': username,
-                'full_name': google_data.name,
-                'password': None,
-                'avatar': google_data.picture,
-                'auth_provider': 'google'
-            }
-            
-            success = agent.db_manager.create_patient(db_data)
-            if not success:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to create account with Google"
-                )
-            
-            patient_profile = agent.db_manager.get_patient_data(patient_id)
-            logger.info(f"New Google user registered: {google_data.email}")
-        
-        access_token = create_access_token(data={"sub": patient_profile["patient_id"]})
-        
-        logger.info(f"Google login successful: {google_data.email}")
-        
-        return Token(
-            access_token=access_token,
-            token_type="bearer",
-            user_info={
-                "patient_id": patient_profile.get("patient_id"),
-                "username": patient_profile.get("username"),
-                "name": patient_profile.get("full_name"),
-                "email": patient_profile.get("email"),
-                "avatar": patient_profile.get("avatar") or google_data.picture,
-                "age_range": patient_profile.get("age_range"),
-                "gender": patient_profile.get("gender"),
-                "auth_provider": "google"
-            }
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Google login error: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Google login failed: {str(e)}"
         )
     finally:
         agent.cleanup()
@@ -810,6 +747,108 @@ async def update_patient_profile(
     finally:
         agent.cleanup()
 
+# ----------------- GOOGLE AUTH ---------------- #
+@app.post("/google-login", response_model=Token)
+async def google_login(google_data: GoogleAuthData):
+    """Google OAuth login/register"""
+    agent = None
+    
+    try:
+        email = google_data.email.lower().strip()
+        logger.info(f"🔵 Google login: {email}")
+        
+        # Initialize database
+        agent = DataRetrievalAgent()
+        
+        # Check if user exists
+        existing_user = agent.db_manager.get_patient_for_auth(email)
+        
+        if existing_user:
+            # Login existing user
+            patient_id = existing_user['patient_id']
+            logger.info(f"✓ Existing user: {patient_id}")
+        else:
+            # Register new user
+            patient_id = f"PT_{uuid.uuid4().hex[:12].upper()}"
+            username = f"{email.split('@')[0]}_{uuid.uuid4().hex[:4]}"
+            
+            user_data = {
+                'patient_id': patient_id,
+                'email': email,
+                'username': username,
+                'full_name': google_data.name,
+                'password': None,
+                'avatar': google_data.picture,
+                'auth_provider': 'google',
+                'age_range': None,
+                'gender': None,
+                'smoking_status': None,
+                'has_hypertension': False,
+                'has_diabetes': False,
+                'has_asthma_history': False,
+                'previous_respiratory_infections': 0,
+                'current_medications': '',
+                'allergies': ''
+            }
+            
+            success = agent.db_manager.create_patient(user_data)
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to create account")
+            
+            logger.info(f"✓ New user created: {patient_id}")
+        
+        # Get user profile
+        profile = agent.db_manager.get_patient_data(patient_id)
+        if not profile:
+            raise HTTPException(status_code=500, detail="Profile not found")
+        
+        # Create JWT token
+        access_token = create_access_token(data={"sub": patient_id})
+        
+        # Build response
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            user_info={
+                "patient_id": profile["patient_id"],
+                "username": profile["username"],
+                "name": profile["full_name"],
+                "email": profile["email"],
+                "avatar": profile.get("avatar") or google_data.picture or f"https://ui-avatars.com/api/?name={google_data.name}",
+                "age_range": profile.get("age_range"),
+                "gender": profile.get("gender"),
+                "auth_provider": "google"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Google login error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if agent:
+            agent.cleanup()
+
+async def generate_unique_username(db_manager, base_username: str, max_attempts: int = 100) -> str:
+    """Generate a unique username with fallback mechanisms"""
+    username = base_username
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            existing = db_manager.get_patient_for_auth(username)
+            if not existing:
+                return username
+            username = f"{base_username}{attempt}"
+        except Exception as e:
+            logger.warning(f"Error checking username uniqueness: {e}")
+            # Fallback to random suffix
+            return f"{base_username}_{uuid.uuid4().hex[:6]}"
+    
+    # If all attempts exhausted, use random username
+    return f"user_{uuid.uuid4().hex[:8]}"
 # ---------------- STATIC FILES ---------------- #
 if os.path.exists("uploads"):
     app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -829,6 +868,16 @@ async def not_found_handler(request, exc):
             "available_endpoints": "/docs"
         }
     )
+
+@app.post("/test-google")
+async def test_google(data: dict):
+    """Debug endpoint - remove in production"""
+    logger.info(f"Test data received: {data}")
+    return {
+        "received": data,
+        "status": "ok",
+        "message": "Backend is working!"
+    }
 
 # ---------------- MAIN EXECUTION BLOCK ---------------- #
 if __name__ == "__main__":
